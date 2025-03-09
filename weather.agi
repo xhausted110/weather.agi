@@ -1,0 +1,242 @@
+#!/bin/bash
+
+# Copyright (C) 2008-2012 Lonnie Abelbeck
+# This is free software, licensed under the GNU General Public License
+# version 3 as published by the Free Software Foundation; you can
+# redistribute it and/or modify it under the terms of the GNU
+# General Public License; and comes with ABSOLUTELY NO WARRANTY.
+#
+# weather.agi
+#
+# Speak Weather from XML data from arg 1 url
+# Using only asterisk "extras" sound files
+#
+# 01-06-2007, created
+# 03-03-2007, qualify windchill and heat_index by temp_f
+# 04-29-2007, require windchill_f < temp_f < heat_index_f
+# 07-17-2009, script cleanup
+# 07-06-2018, format changes and broken certificate... 
+#
+# Usage: (Replace "KMLE" using http://www.weather.gov/xml/current_obs/)
+#exten => s,1,Answer
+#exten => s,n,Playback(weather)
+#exten => s,n,AGI(weather.agi,http://www.weather.gov/xml/current_obs/KMLE.xml)
+#exten => s,n,Hangup
+#
+
+# [read AGI variables]
+while read -e ARG && [ "${ARG}" ] ; do :; done # ignore agi_ variables
+
+# Copy url for XML host and clean it
+URL="$(echo $1 | sed -e 's/"//g')"
+
+# Define the location of the "extras" sound files.
+# Use an empty string (EXTRAS="") if they are not in a separate directory.
+EXTRAS=""
+# A person could also define a custom set of sounds just for weather.agi.
+#EXTRAS="extras/"
+
+# [results function]
+checkresults()
+{
+    local line
+
+    while read line
+    do
+    case ${line:0:4} in
+    "200 " ) return;;
+    "510 " ) return;;
+    "520 " ) return;;
+    *      ) ;;                     #keep on reading those Invlid command
+                                    #command syntax until "520 End ..."
+    esac
+    done
+}
+
+stream_file()
+{
+    echo "STREAM FILE $1 #"
+    checkresults
+}
+
+say_number()
+{
+    echo "SAY NUMBER $1 #"
+    checkresults
+}
+
+# Text Values
+get_text_tag()
+{
+    echo $1 | sed -e "s/^.*<${2}[ >]//" -e 's/<.*$//' -e 's/^.*>//'
+}
+
+#  VNumericalues (truncate floats to integers)
+int_f
+get_number_tag()
+{
+    echo $1 | sed -e "s/^.*<${2}[ >]//" -e 's/<.*$//' -e 's/\..*$//' -e 's/^.*>//'
+}
+
+# [main]
+    sleep 0.5
+    stream_file "${EXTRAS}national-weather-service"
+# Get XML elements
+# Note: the data values must be on the same line as the opening tag.
+# curl --silent "$URL"   should also work.
+DATA="$(wget --no-check-certificate -q -O - "$URL" | \
+    grep -E '(<weather[ >]|<temp_f[ >]|<relative_humidity[ >]|<wind_degrees[ >]|<wind_mph[ >]|<wind_gust_mph[ >]|<pressure_in[ >]|<dewpoint_f[ >]|<heat_index_f[ >]|<windchill_f[ >]|<visibility_mi[ >])')"
+if [ -z "$DATA" ]; then
+    stream_file "${EXTRAS}were-sorry"
+    exit 0
+fi
+
+# Define a default prefix to define any missing tags
+DATA="NA</>$DATA"
+
+# Text Values
+WEATHER="$(get_text_tag "$DATA" "weather")"
+
+DATA="$(echo $DATA | sed -e 's/ //g')"
+
+# Numeric Values
+TEMP_F="$(get_number_tag "$DATA" "temp_f")"
+
+WINDCHILL_F="$(get_number_tag "$DATA" "windchill_f")"
+
+PRESSURE_IN="$(get_number_tag "$DATA" "pressure_in")"
+
+DEWPOINT_F="$(get_number_tag "$DATA" "dewpoint_f")"
+
+RELATIVE_HUMIDITY="$(get_number_tag "$DATA" "relative_humidity")"
+
+VISABILITY_MI="$(get_number_tag "$DATA" "visibility_mi")"
+
+HEAT_INDEX_F="$(get_number_tag "$DATA" "heat_index_f")"
+
+WIND_DEGREES="$(get_number_tag "$DATA" "wind_degrees")"
+
+WIND_MPH="$(get_number_tag "$DATA" "wind_mph")"
+
+WIND_GUST_MPH="$(get_number_tag "$DATA" "wind_gust_mph")"
+
+if echo $WEATHER | grep -q -i "thunderstorm"; then
+    stream_file "${EXTRAS}thunderstorm"
+    sleep 1
+elif echo $WEATHER | grep -q -i "fair"; then
+    stream_file "${EXTRAS}sunny"
+#    stream_file "${EXTRAS}wx/stady"   
+elif echo $WEATHER | grep -q -i "rain"; then
+    if echo $WEATHER | grep -q -i "freezing"; then
+        stream_file "${EXTRAS}freezing"
+    fi
+    stream_file "${EXTRAS}rain"
+    if echo $WEATHER | grep -q -i "snow"; then
+    stream_file "${EXTRAS}snow"
+    fi
+elif echo $WEATHER | grep -q -i "cloudy"; then
+    if echo $WEATHER | grep -q -i "partly"; then
+        stream_file "${EXTRAS}partly"
+    fi
+    stream_file "${EXTRAS}cloudy"
+
+elif echo $WEATHER | grep -q -i "mist"; then
+    stream_file "${EXTRAS}misty"
+
+elif echo $WEATHER | grep -q -i "fog"; then
+    stream_file "${EXTRAS}foggy"
+
+elif echo $WEATHER | grep -q -i "windy"; then
+    stream_file "${EXTRAS}windy"
+#    sleep 1
+fi
+
+if [[ "${TEMP_F:0:1}" == [-0-9] ]]; then
+    stream_file "${EXTRAS}wx/temperature"
+    say_number "${TEMP_F}"
+    stream_file "${EXTRAS}degrees"
+fi
+#relative_humidity
+if [[ "${RELATIVE_HUMIDITY:0:1}" == [-0-9] ]]; then
+    stream_file "${EXTRAS}wx/humidity"
+    say_number "${RELATIVE_HUMIDITY}"
+    stream_file "${EXTRAS}wx/percent"
+fi
+#dewpoint_f
+if [[ "${DEWPOINT_F:0:1}" == [-0-9] ]]; then
+    stream_file "${EXTRAS}wx/dew-point"
+    say_number "${DEWPOINT_F}"
+    stream_file "${EXTRAS}degrees"
+fi
+#pressure_in
+if [[ "${PRESSURE_IN:0:1}" == [-0-9] ]]; then
+    stream_file "${EXTRAS}wx/barometer"
+    say_number "${PRESSURE_IN}"
+    stream_file "${EXTRAS}wx/inches"
+fi
+if [[ "${WINDCHILL_F:0:1}" == [-0-9] && "${TEMP_F}" -lt 50 ]]; then
+    if [[ "${WINDCHILL_F}" -lt "${TEMP_F}" ]]; then
+#        sleep 1
+        stream_file "${EXTRAS}wx/wind-chill"
+        say_number "${WINDCHILL_F}"
+    fi
+fi
+if [[ "${HEAT_INDEX_F:0:1}" == [-0-9] && "${TEMP_F}" -gt 80 ]]; then
+    if [[ "${HEAT_INDEX_F}" -gt "${TEMP_F}" ]]; then
+#        sleep 1
+        stream_file "${EXTRAS}wx/heat-index"
+        say_number "${HEAT_INDEX_F}"
+    fi
+fi
+sleep 0.5
+
+#
+# Note: the octet of directions are not evenly spaced at 45 degrees.
+# North and South are 70 degrees wide
+# East and West are 50 degrees wide
+# The remaining are 30 degrees wide
+#
+# This arangement gives me a better mental image of the prevailing winds.
+# Different locations might want to augment this.
+#
+if [[ "${WIND_DEGREES:0:1}" != [0-9] ]]; then
+    : # ignore NA wind direction
+elif [[ "${WIND_DEGREES}" -gt 35 && "${WIND_DEGREES}" -lt 65 ]]; then
+    stream_file "${EXTRAS}wx/northeast"
+elif [[ "${WIND_DEGREES}" -ge 65 && "${WIND_DEGREES}" -le 115 ]]; then
+    stream_file "${EXTRAS}east"
+elif [[ "${WIND_DEGREES}" -gt 115 && "${WIND_DEGREES}" -lt 145 ]]; then
+    stream_file "${EXTRAS}wx/southeast"
+elif [[ "${WIND_DEGREES}" -gt 215 && "${WIND_DEGREES}" -lt 245 ]]; then
+    stream_file "${EXTRAS}wx/southwest"
+elif [[ "${WIND_DEGREES}" -ge 245 && "${WIND_DEGREES}" -le 295 ]]; then
+    stream_file "${EXTRAS}west"
+elif [[ "${WIND_DEGREES}" -gt 295 && "${WIND_DEGREES}" -lt 325 ]]; then
+    stream_file "${EXTRAS}wx/northwest"
+elif [[ "${WIND_DEGREES}" -ge 90 && "${WIND_DEGREES}" -le 270 ]]; then
+    stream_file "${EXTRAS}south"
+else
+    stream_file "${EXTRAS}north"
+fi
+stream_file "${EXTRAS}wx/winds"
+
+if [[ "${WIND_MPH:0:1}" == [0-9] ]]; then
+    say_number "${WIND_MPH}"
+else
+    say_number "0"
+fi
+stream_file "${EXTRAS}miles-per-hour"
+
+if [[ "${WIND_GUST_MPH:0:1}" == [1-9] ]]; then
+    sleep 1
+    stream_file "${EXTRAS}wx/gusting-to"
+    say_number "${WIND_GUST_MPH}"
+fi
+#visibility_mi
+if [[ "${VISABILITY_MI:0:1}" == [-0-9] ]]; then
+    stream_file "${EXTRAS}visibility"
+    say_number "${VISABILITY_MI}"
+    stream_file "${EXTRAS}miles"
+fi
+
+exit 0
