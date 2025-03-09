@@ -36,6 +36,11 @@ EXTRAS=""
 # A person could also define a custom set of sounds just for weather.agi.
 #EXTRAS="extras/"
 
+currentHour=`date +%I | sed 's/^0//'` #get 12 hour hour, remove leading zeros if there are any.
+current24Hour=`date +%H` #get 24 hour hour, for if statements
+currentMinute=`date +%M |sed 's/^0//'` #get current minute, remove leading zeros if there are any.
+amPm=`date +%P` #AM or PM, lowercase for sound file compatiblity 
+
 # [results function]
 checkresults()
 {
@@ -80,6 +85,21 @@ get_number_tag()
 
 # [main]
     sleep 0.5
+    
+    if [ $current24Hour -lt 12 ]; then
+	    stream_file "good-morning"
+    elif [ $current24Hour -lt 18 ]; then
+	    stream_file "good-afternoon"
+    else
+	    stream_file "good-evening"
+    fi
+
+    sleep 0.25
+    
+    stream_file "current-time-is"
+    say_number "${currentHour}"
+    say_number "${currentMinute}"
+
     stream_file "${EXTRAS}national-weather-service"
 # Get XML elements
 # Note: the data values must be on the same line as the opening tag.
@@ -238,5 +258,7 @@ if [[ "${VISABILITY_MI:0:1}" == [-0-9] ]]; then
     say_number "${VISABILITY_MI}"
     stream_file "${EXTRAS}miles"
 fi
+
+stream_file "thank-you-for-calling"
 
 exit 0
