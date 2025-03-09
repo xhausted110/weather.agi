@@ -99,7 +99,7 @@ get_number_tag()
     stream_file "current-time-is"
     say_number "${currentHour}"
 
-    if [ $currentMinute == 0 ]; then
+    if [ $currentMinute -eq 0 ]; then
 	    stream_file "digits/oclock.ulaw"
     else
 	    say_number "${currentMinute}"
